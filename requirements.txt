@@ -5,4 +5,5 @@ ultralytics==8.0.20
 pillow
 seaborn
 numpy
-opencv-python-headless==4.8.0.76
+opencv-python==4.8.0.76
+
