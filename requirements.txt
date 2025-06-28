@@ -1,7 +1,5 @@
 streamlit
-streamlit-webrtc==0.45.0
-ultralytics==8.0.20
-opencv-python-headless==4.8.0.76
+streamlit-webrtc
+ultralytics
+opencv-python-headless
 numpy
-pandas
-altair

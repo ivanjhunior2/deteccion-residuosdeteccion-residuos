@@ -1,137 +1,104 @@
 import streamlit as st
-from streamlit_webrtc import webrtc_streamer
-import av
 from ultralytics import YOLO
 import cv2
 import numpy as np
 import datetime
 import os
-import csv
-import pandas as pd
-import altair as alt
+from PIL import Image
 
-# Configuración de página
-st.set_page_config(page_title="Detector de Residuos en Vivo", layout="wide")
+# Configuración de la página
+st.set_page_config(page_title="Detector de Residuos", layout="wide")
 
 st.markdown("""
-    <style>
-        .title {
-            text-align: center;
-            color: #2e7d32;
-        }
-        .subtitle {
-            text-align: center;
-            color: #555;
-        }
-        .stButton>button {
-            background-color: #4CAF50;
-            color: white;
-            font-weight: bold;
-            border-radius: 8px;
-            padding: 0.6em 1.5em;
-            margin: 10px 5px;
-        }
-        .stButton>button:hover {
-            background-color: #45a049;
-        }
-    </style>
+    <h1 style='text-align: center;'>♻️ Detección de Residuos en Tiempo Real</h1>
+    <h4 style='text-align: center;'>Proyecto del equipo: Ivan Aiza, Alan Caceres, Alejandra Villarroel, Fernando Quinteros</h4>
+    <hr>
 """, unsafe_allow_html=True)
 
-# --- Título ---
-st.markdown("<h1 class='title'>♻️ Detector de Residuos</h1>", unsafe_allow_html=True)
-st.markdown("<h4 class='subtitle'>Equipo: Ivan Aiza, Alan Caceres, Alejandra Villarroel, Fernando Quinteros</h4>", unsafe_allow_html=True)
-st.markdown("---")
-
-# --- Cargar modelo (cacheado para eficiencia) ---
+# Cargar modelo
 @st.cache_resource
 def load_model():
-    return YOLO("modelo.pt")  
+    return YOLO("modelo.pt")
 
 model = load_model()
 
-# Crear carpeta y CSV para guardado
-os.makedirs("capturas", exist_ok=True)
-csv_file = "detecciones.csv"
+# Interfaz de control
+col1, col2 = st.columns(2)
+start = col1.button("▶️ Iniciar cámara")
+stop = col2.button("⛔ Detener cámara")
 
-if not os.path.exists(csv_file):
-    with open(csv_file, mode='w', newline='') as f:
-        writer = csv.writer(f)
-        writer.writerow(["nombre_imagen", "clase", "confianza", "timestamp"])
+capture = st.button("📸 Capturar imagen")
+FRAME_WINDOW = st.image([])
 
-# Estado para guardar capturas
-if "capture_now" not in st.session_state:
-    st.session_state.capture_now = False
+# Crear carpeta para capturas
+CAPTURE_DIR = "capturas"
+os.makedirs(CAPTURE_DIR, exist_ok=True)
 
-if "last_frame" not in st.session_state:
-    st.session_state.last_frame = None
+# Inicializar estado de la cámara
+if "camera_active" not in st.session_state:
+    st.session_state.camera_active = False
 
-if "last_detections" not in st.session_state:
-    st.session_state.last_detections = []
+if start:
+    st.session_state.camera_active = True
 
-# Botón para capturar frame
-if st.button("📸 Capturar frame actual"):
-    st.session_state.capture_now = True
+if stop:
+    st.session_state.camera_active = False
 
-def video_frame_callback(frame: av.VideoFrame) -> av.VideoFrame:
-    img = frame.to_ndarray(format="bgr24")
+# Lista para historial
+if "captured_images" not in st.session_state:
+    st.session_state.captured_images = []
 
-    # Detección con YOLO
-    results = model(img, verbose=False)
-    annotated = img.copy()
-    detections = []
+# Proceso de cámara
+if st.session_state.camera_active:
+    cap = cv2.VideoCapture(0)
+    st.info("Cámara activa. Presiona '⛔ Detener cámara' para finalizar.")
 
-    for result in results:
-        for box in result.boxes:
-            x1, y1, x2, y2 = map(int, box.xyxy[0])
-            cls = int(box.cls[0])
-            conf = float(box.conf[0])
-            label = f"{model.names[cls]} {conf:.2f}"
+    while st.session_state.camera_active:
+        ret, frame = cap.read()
+        if not ret:
+            st.error("No se pudo acceder a la cámara.")
+            break
 
-            detections.append((model.names[cls], conf))
+        results = model(frame, verbose=False)
+        annotated_frame = frame.copy()
 
-            # Dibujar caja y etiqueta
-            cv2.rectangle(annotated, (x1, y1), (x2, y2), (0, 255, 0), 2)
-            cv2.putText(annotated, label, (x1, y1 - 10),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
+        for result in results:
+            for box in result.boxes:
+                x1, y1, x2, y2 = map(int, box.xyxy[0])
+                cls = int(box.cls[0])
+                conf = float(box.conf[0])
+                label = f"{model.names[cls]} {conf:.2f}"
+                cv2.rectangle(annotated_frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
+                cv2.putText(annotated_frame, label, (x1, y1 - 10),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
 
-    # Guardar último frame y detecciones en el estado de Streamlit
-    st.session_state.last_frame = annotated
-    st.session_state.last_detections = detections
+        # Mostrar en Streamlit
+        FRAME_WINDOW.image(cv2.cvtColor(annotated_frame, cv2.COLOR_BGR2RGB))
 
-    return av.VideoFrame.from_ndarray(annotated, format="bgr24")
+        # Guardar captura si se presiona botón
+        if capture:
+            filename = datetime.datetime.now().strftime("%Y%m%d_%H%M%S") + ".jpg"
+            path = os.path.join(CAPTURE_DIR, filename)
+            cv2.imwrite(path, annotated_frame)
+            st.success(f"📸 Captura guardada como `{filename}`")
 
-# Mostrar el stream de video con callback
-webrtc_ctx = webrtc_streamer(key="yolo_detector", video_frame_callback=video_frame_callback)
+            # Agregar al historial
+            st.session_state.captured_images.append(path)
 
-# Guardar imagen y datos si se solicitó captura
-if st.session_state.capture_now and st.session_state.last_frame is not None:
-    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-    filename = f"{timestamp}.jpg"
-    path = os.path.join("capturas", filename)
-    cv2.imwrite(path, st.session_state.last_frame)
+            # Detener cámara
+            st.session_state.camera_active = False
+            break
 
-    with open(csv_file, mode='a', newline='') as f:
-        writer = csv.writer(f)
-        for clase, conf in st.session_state.last_detections:
-            writer.writerow([filename, clase, f"{conf:.2f}", timestamp])
+    cap.release()
+    cv2.destroyAllWindows()
+else:
+    st.warning("Cámara detenida. Haz clic en '▶️ Iniciar cámara' para comenzar.")
 
-    st.success(f"✅ Imagen guardada como `{filename}` y datos agregados a `detecciones.csv`")
+# Mostrar historial de capturas
+if st.session_state.captured_images:
+    st.markdown("## 🖼️ Historial de capturas")
+    cols = st.columns(4)
+    for i, img_path in enumerate(reversed(st.session_state.captured_images)):
+        with cols[i % 4]:
+            st.image(Image.open(img_path), caption=os.path.basename(img_path), use_container_width=True)
 
-    # Reset flag
-    st.session_state.capture_now = False
-
-# Mostrar resumen con Altair si hay datos
-if os.path.exists(csv_file):
-    df = pd.read_csv(csv_file)
-    if not df.empty:
-        st.markdown("### 📊 Resumen de Detecciones")
-        resumen = df['clase'].value_counts().reset_index()
-        resumen.columns = ['Clase', 'Cantidad']
-
-        chart = alt.Chart(resumen).mark_bar().encode(
-            x='Clase',
-            y='Cantidad',
-            color='Clase'
-        ).properties(width=600)
-
-        st.altair_chart(chart, use_container_width=True)
