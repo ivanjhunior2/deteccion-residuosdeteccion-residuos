@@ -1,0 +1,5 @@
+echo capturas/ >> .gitignore
+echo *.pyc >> .gitignore
+echo __pycache__/ >> .gitignore
+echo .DS_Store >> .gitignore
+echo venv/ >> .gitignore
